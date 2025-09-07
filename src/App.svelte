@@ -3,6 +3,12 @@
   import FileInput from "./components/FileInput.svelte";
   import Loading from "./components/Loading.svelte";
 
+  import { audioElement, currentFragment } from '$lib/stores/overlay.js';
+  import ExercisePanel from '$components/ExercisePanel.svelte';
+
+
+
+
   import { onMount } from "svelte";
   import { loadFile } from "./reader/loader";
   import { readContentDOM, lookBackward, lookForward } from "./reader/reader";
@@ -18,8 +24,10 @@
   let playing = false;
   let loading = false;
   let cache = {};
+  let audioEl;
 
   onMount(async () => {
+    audioElement.set(audioRef);
     if ("serviceWorker" in navigator) {
       if (__dev__) {
         const regs = await navigator.serviceWorker.getRegistrations();
@@ -59,6 +67,10 @@
     audioRef.pause();
     cursor.classList.remove("active");
   };
+  // Call this whenever the SMIL <par> changes:
+  function onActivePar({ id, start, end, text, glossDe, glossEn }) {
+    currentFragment.set({ id, start, end, text, glossDe, glossEn });
+  }
 
   /**
    *
@@ -67,7 +79,7 @@
    * @returns {Promise<void>}
    */
   function playAudio(audio, element) {
-    return new Promise(async resolve => {
+    return new Promise(async (resolve, reject) => {
       try {
         audioRef.src = audio;
 
@@ -75,8 +87,7 @@
           audioRef.pause();
           audioRef.removeEventListener("pause", onCompleted);
           element.classList.remove("active");
-
-          return resolve();
+          resolve();
         };
 
         const onStart = async () => {
@@ -84,15 +95,59 @@
           audioRef.removeEventListener("canplaythrough", onStart);
           element.classList.add("active");
 
+          // --- NEW: gather fragment data for ExercisePanel ---
+          // id: prefer explicit element id; fallback to a stable selector
+          const id = element.getAttribute("id") || element.dataset?.id || "frag-" + Math.random().toString(36).slice(2);
+
+          // text: innerText/trim
+          const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+
+          // optional glosses from data attributes if you have them in your markup
+          const glossDe = element.dataset?.glossDe || undefined;
+          const glossEn = element.dataset?.glossEn || undefined;
+
+          // timing:
+          // try to read SMIL clip times if your loader put them on the element
+          const beginAttr = element.dataset?.begin; // e.g., "0:00:01.30" or "1.3s"
+          const endAttr = element.dataset?.end;     // e.g., "0:00:02.50" or "2.5s"
+
+          const parseClock = (t) => {
+            if (!t) return null;
+            if (/^\d+(\.\d+)?s$/.test(t)) return parseFloat(t);
+            const parts = t.split(":").map(Number);
+            if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            const n = Number(t);
+            return Number.isFinite(n) ? n : null;
+          };
+
+          let start = parseClock(beginAttr);
+          let end = parseClock(endAttr);
+
+          // If no per-fragment times exist (common if each <par> maps to its own audio file),
+          // fall back to 0..duration.
+          if (start == null) start = 0;
+          if (end == null || !Number.isFinite(end) || end <= 0) {
+            // duration is now known on canplaythrough
+            end = Number.isFinite(audioRef.duration) ? audioRef.duration : start;
+          }
+
+          // publish to ExercisePanel
+          onActivePar({ id, start, end, text, glossDe, glossEn });
+
+          // --- END NEW ---
+
+          audioRef.currentTime = start;
           audioRef.play();
         };
 
         audioRef.addEventListener("canplaythrough", onStart);
       } catch (error) {
-        return Promise.reject(error);
+        reject(error);
       }
     });
   }
+
 
   const readDocument = async () => {
     walker = readContentDOM(cursor);
@@ -204,6 +259,7 @@
   });
 
   $: content, setTimeout(onDocumentLoad, 0);
+
 </script>
 
 <style>
@@ -220,11 +276,15 @@
       disabled={loading} />
   {/if}
   {#if content}
+    <section>
+      <ExercisePanel />
+    </section>
     <section class="content">
       <div id="content" bind:this={ref} on:click={onContentSelect}>
         {@html content}
       </div>
     </section>
+
   {/if}
   <audio bind:this={audioRef} />
   <Controls

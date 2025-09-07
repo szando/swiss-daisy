@@ -2,11 +2,13 @@ import svelte from "rollup-plugin-svelte";
 import resolve from "@rollup/plugin-node-resolve";
 import commonjs from "@rollup/plugin-commonjs";
 import livereload from "rollup-plugin-livereload";
-import alias from "@rollup/plugin-alias";
 import replace from "@rollup/plugin-replace";
 import { terser } from "rollup-plugin-terser";
 import { svelteSVG } from "rollup-plugin-svelte-svg";
 import css from "rollup-plugin-css-only";
+import alias from '@rollup/plugin-alias';
+import path from 'path';
+
 
 const production = !process.env.ROLLUP_WATCH;
 
@@ -19,6 +21,12 @@ export default {
     file: "public/build/bundle.js",
   },
   plugins: [
+    alias({
+      entries: [
+        { find: '$lib', replacement: path.resolve(__dirname, 'src/lib') },
+        { find: '$components', replacement: path.resolve(__dirname, 'src/components') }
+      ]
+    }),
     svelteSVG(),
     svelte({
       compilerOptions: {

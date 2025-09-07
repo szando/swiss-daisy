@@ -3,3 +3,13 @@
 /build
 
 .DS_Store
+
+.idea/
+
+.env
+
+package-lock.json
+
+yarn.lock
+
+data/
